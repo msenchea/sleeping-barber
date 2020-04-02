@@ -9,62 +9,92 @@ SEATS = 5 # set amount of seats in the waiting room here
 
 ARRIVAL_WAIT = 0.01
 
+waiting_room_lock = threading.Lock()
+
 def wait():
 	time.sleep(ARRIVAL_WAIT * random.random())
 
 class Barber(threading.Thread):
-	condition = threading.Condition()
-	customers = []
-	should_stop = threading.Event() #for when all customers have been serviced
+
+	is_asleep = False
+
+	def is_sleeping(self):
+		return self.is_asleep
+
+	def sleep(self):
+		pass
+		self.is_asleep = True
+
+	def wake_up(self):
+		pass
+
+	def cut_hair(self, customer):
+		time.sleep(random.random())
+		# customer.set() or something
+		pass
 
 	def run(self):
+		should_stop = threading.Event()
+
 		while True:
-			with self.condition:
-				if not self.customers:
-					print("barber sleeping")
-					self.condition.wait() #sleep and wait for customer
-				current_customer = self.customers[0]
-			current_customer.trim()
-
-			if self.should_stop.is_set():
-				break
-
+			waiting_room_lock.acquire()
+			if not waiting_room.is_empty():
+				customer = waiting_room.next()
+				waiting_room_lock.release()
+				self.cut_hair(customer)
+			else:
+				waiting_room_lock.release()
+				self.sleep()
 
 
 class Customer(threading.Thread):
-	WAIT = 0.05
-	def wait(self):
-		time.sleep(self.WAIT * random.random())
-
-	def trim(self):  # Called from Barber thread
-		# Get a haircut
-		print("customer is getting a haircut")
-		self.serviced.set()
-
 
 	def run(self):
-		self.serviced = threading.Event()
-		# Grab the barbers' attention, add ourselves to the customers,
-		barbers[0].condition.notify()
-		barbers[0].customers.append(self)
-		print("waiting to be serviced")
-		while not self.serviced.is_set():
-			continue
+		hair_cut = threading.Event()
+		while not hair_cut:
+			pass
+	def go_to_waiting_room(self):
+		waiting_room_lock.acquire()
+		if waiting_room.is_full():
+			waiting_room_lock.release()
+			time.sleep()
+		else:
+			waiting_room.join_queue(self)
+			waiting_room_lock.release()
 
 
-		# and wait to be serviced
+class WaitingRoom():
+
+	def __init__(self, seats):
+		self.queue = []
+		self.seats = seats
+
+	def is_empty(self):
+		return len(self.queue) == 0
+
+	def is_full(self):
+		return len(self.queue) == self.seats
+
+	def join_queue(self, customer):
+		self.queue.append(customer)
+
+	def next(self):
+		next = self.queue[0]
+		del self.queue[0]
+		return next
 
 
 if __name__ == "__main__":
 	all_customers = []          # list of all customers for the day
-	barbers = []            # list of all barbers
+	barbers = []
+
+	waiting_room = WaitingRoom(20)
+	print("waiting room initialised")
 
 	for b in range(BARBERS):
-		wait()
 		b = Barber()
 		barbers.append(b)
 		b.start()
-		print("barber started")
 
 	for c in range(CUSTOMERS):
 		wait()
@@ -76,4 +106,4 @@ if __name__ == "__main__":
 	for c in all_customers:
 		c.join()  # Wait for all customers to leave
 	# Grab the barbers' attention and tell them all that it's time to leave - using events I think
-	barbers[0].should_stop.set()
+	print("The shop is now closed.")
