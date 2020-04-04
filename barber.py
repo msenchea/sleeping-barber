@@ -1,4 +1,3 @@
-import sys
 import threading
 import time
 import random
@@ -6,17 +5,14 @@ import queue
 
 BARBERS = 3 # set amount of barbers here
 CUSTOMERS = 1000 # set amount of customers for the day here
-SEATS = 5 # set amount of seats in the waiting room here
-
-wr_lock = threading.Lock()  # lock for accessing of the waiting room
-
-ARRIVAL_WAIT = 0.15
+SEATS = 15 # set amount of seats in the waiting room here
+ARRIVAL_WAIT = 0.01 # set multiple of random.random() that customers arrive
 
 def wait():
 	time.sleep(ARRIVAL_WAIT * random.random())
 
 class Barber(threading.Thread):
-	condition = threading.Event()
+	condition = threading.Condition()
 	should_stop = threading.Event() #for when all customers have been serviced
 
 	def __init__(self, ID):
@@ -26,26 +22,21 @@ class Barber(threading.Thread):
 
 	def run(self):
 		while True:
-			if waiting_room.qsize() == 0:
+			try:
+				current_customer = waiting_room.get(block=False)
+			except queue.Empty:
+				if self.should_stop.is_set():
+					print(f"barber {self.ID} has signed out for the day")
+					return
+
 				print(f"barber {self.ID} sleeping")
-				while waiting_room.empty() and not self.should_stop.is_set():	# prevents sleep-awake cycle
+				with self.condition:	# prevents sleep-awake cycle
 					self.condition.wait() #sleep and wait for customer
-				#print(f"barber {self.ID} has awoken")
-
-			if self.should_stop.is_set():
-				print(f"barber {self.ID} has signed out for the day")
-				return
-
-			wr_lock.acquire()
-			if waiting_room.qsize() > 0:
-				current_customer = waiting_room.get()
-				wr_lock.release()
-				current_customer.trim(self.ID)
 			else:
-				wr_lock.release()
+				current_customer.trim(self.ID)
 
 class Customer(threading.Thread):
-	WAIT = 15
+	WAIT = 0.05
 
 	def __init__(self, ID):
 		super().__init__()
@@ -66,24 +57,26 @@ class Customer(threading.Thread):
 		self.serviced = threading.Event()
 		# Grab the barbers' attention, add ourselves to the customers,
 
-		if not(waiting_room.qsize() >= waiting_room.maxsize):
-			waiting_room.put(self)
-			Barber.condition.set()
-			#print(f"customer {self.ID} took a seat in the waiting room")
-		else:
+		try:
+			waiting_room.put(self, block=False) # block=False makes it so put doesn't wait for a space in the queue.
+		except queue.Full: # Prevents me from needing to use a lock.
 			print(f"waiting room full, {self.ID} left")
 			return
 
-		while not self.serviced.is_set():
-			continue
+		print(f"customer {self.ID} sat in waiting room")
+		with Barber.condition:
+			Barber.condition.notify(1)
+			#print(f"customer {self.ID} took a seat in the waiting room")
 
-		print(f"customer {self.ID} is leaving")
+		self.serviced.wait()
+
+		#print(f"customer {self.ID} is leaving")
 
 
 if __name__ == "__main__":
 
 	all_customers = []          # list of all customers for the day
-	waiting_room = queue.Queue(SEATS)
+	waiting_room = queue.Queue(SEATS) #Max size of SEATS takes care not needing to check qsize before Queue.put()
 
 	for i in range(BARBERS):
 		barber_thread = Barber(i)
@@ -99,7 +92,8 @@ if __name__ == "__main__":
 
 	for customer in all_customers:
 		customer.join()  # Wait for all customers to leave
-	# Grab the barbers' attention and tell them all that it's time to leave - using conditions I think
+	# Grab the barbers' attention and tell them all that it's time to leave
 
 	Barber.should_stop.set()
-	Barber.condition.set()
+	with Barber.condition:
+		Barber.condition.notify_all()
