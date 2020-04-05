@@ -1,99 +1,91 @@
 import threading
 import time
 import random
-import queue
+import queue # queue get and put are thread safe, excellent module to import.
 
 BARBERS = 3 # set amount of barbers here
 CUSTOMERS = 1000 # set amount of customers for the day here
 SEATS = 15 # set amount of seats in the waiting room here
-ARRIVAL_WAIT = 0.01 # set multiple of random.random() that customers arrive
+ARRIVAL_WAIT = 1 # set multiple of random.random() that customers arrive
 
-def wait():
+def arrival_wait(): # simulates customers arriving at random times
 	time.sleep(ARRIVAL_WAIT * random.random())
 
 class Barber(threading.Thread):
-	condition = threading.Condition()
-	should_stop = threading.Event() #for when all customers have been serviced
+	condition = threading.Condition() # to put the barber to sleep/wake up
+	should_stop = threading.Event() # for when all customers have been serviced
 
 	def __init__(self, ID):
 		super().__init__()
-		self.ID = ID
+		self.ID = ID	# barber ID number
 
 
 	def run(self):
 		while True:
-			try:
-				current_customer = waiting_room.get(block=False)
-			except queue.Empty:
-				if self.should_stop.is_set():
-					print(f"barber {self.ID} has signed out for the day")
+			try:	# using a try & except is better than checking qsize, as queue.qsize() is not thread safe.
+				current_customer = waiting_room.get(block=False) # block=false so thread doesn't wait/block for a space in the queue.
+			except queue.Empty: # thrown when waiting room is empty.
+				if self.should_stop.is_set(): # should_stop is only set after all customers have been processed for the day.
 					return
 
-				print(f"barber {self.ID} sleeping")
-				with self.condition:	# prevents sleep-awake cycle
-					self.condition.wait() #sleep and wait for customer
+				print(f"barber {self.ID} sleeping") # no customers, sleep
+				with self.condition:
+					self.condition.wait() # sleep and wait for customer to wake me
 			else:
-				current_customer.trim(self.ID)
+				current_customer.trim(self.ID) # cut the customers hair
 
 class Customer(threading.Thread):
-	WAIT = 0.05
+	HAIRCUT_DURATION = 5
 
 	def __init__(self, ID):
 		super().__init__()
 		self.ID = ID
 
-	def wait(self):
-		time.sleep(self.WAIT * random.random())
+	def haircut(self): # simulates a haircut
+		time.sleep(self.HAIRCUT_DURATION * random.random())
 
-	def trim(self, barber_ID):  # Called from Barber thread
-		# Get a haircut
+	def trim(self, barber_ID):  # called from Barber thread
 		print(f"barber {barber_ID} is cutting customer {self.ID}'s hair")
-		self.wait()
+		self.haircut() # get a haircut
 		print(f"barber {barber_ID} finished cutting customer {self.ID}'s hair")
-		#print(f"customer {self.ID}'s hair is cut.'")
-		self.serviced.set()
+		self.serviced.set() # set serviced so customer may leave the barbershop
 
 	def run(self):
 		self.serviced = threading.Event()
-		# Grab the barbers' attention, add ourselves to the customers,
 
-		try:
-			waiting_room.put(self, block=False) # block=False makes it so put doesn't wait for a space in the queue.
-		except queue.Full: # Prevents me from needing to use a lock.
+		try:	# check if theres space in the waiting room
+			waiting_room.put(self, block=False)
+		except queue.Full: # no space, leave
 			print(f"waiting room full, {self.ID} left")
 			return
 
 		print(f"customer {self.ID} sat in waiting room")
 		with Barber.condition:
-			Barber.condition.notify(1)
-			#print(f"customer {self.ID} took a seat in the waiting room")
+			Barber.condition.notify(1) # wakes up exactly 1 barber if there are any sleeping
 
-		self.serviced.wait()
-
-		#print(f"customer {self.ID} is leaving")
+		self.serviced.wait() # wait to get haircut and then leave
 
 
 if __name__ == "__main__":
-
 	all_customers = []          # list of all customers for the day
-	waiting_room = queue.Queue(SEATS) #Max size of SEATS takes care not needing to check qsize before Queue.put()
+	waiting_room = queue.Queue(SEATS) # max size of SEATS, removes need to check Queue.qsize() before Queue.put()
 
-	for i in range(BARBERS):
+	for i in range(BARBERS): # create barber threads
 		barber_thread = Barber(i)
 		barber_thread.start()
-		#print(f"barber {i} started")	# using fstrings as they are easier to read than formatting - must have python 3.6 or above installed however.
 
-	for i in range(CUSTOMERS):
-		wait()
+	for i in range(CUSTOMERS): # create customer threads
+		arrival_wait()
 		customer = Customer(i)
 		all_customers.append(customer)
 		customer.start()
-		#print(f"customer {i} started")
 
 	for customer in all_customers:
-		customer.join()  # Wait for all customers to leave
-	# Grab the barbers' attention and tell them all that it's time to leave
+		customer.join()  # wait for all customers to leave
 
-	Barber.should_stop.set()
+	time.sleep(0.1) # to give the last barber enough time to clean up after the final customer
+	Barber.should_stop.set() # let the barbers know work is over for the day
 	with Barber.condition:
-		Barber.condition.notify_all()
+		Barber.condition.notify_all() # wake them all up if they are sleeping so they can leave
+
+	print("barber shop closed")
