@@ -4,7 +4,7 @@ import random
 import queue # queue get and put are thread safe, excellent module to import.
 
 BARBERS = 3 # set amount of barbers here
-CUSTOMERS = 1000 # set amount of customers for the day here
+CUSTOMERS = 100 # set amount of customers for the day here
 SEATS = 15 # set amount of seats in the waiting room here
 ARRIVAL_WAIT = 1 # set multiple of random.random() that customers arrive
 
